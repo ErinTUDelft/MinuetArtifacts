@@ -10,12 +10,19 @@ import tempfile
 import minuet
 import numpy as np
 import torch
+from torch.nn import Sequential
 from minuet.nn import KernelMapCache
 from minuet.utils.file_system import ensure_directory
 from scipy.stats import gmean
 
+import minuet.nn as spnn
+
 from utils.datasets.helpers import make_dataset, make_tensor_from_dataset, \
   save_random_state, load_random_state
+
+# Profiling
+from torch.profiler import profile, record_function, ProfilerActivity
+
 
 
 def main(args):
@@ -35,9 +42,10 @@ def main(args):
     model = Conv3d(in_channels=args.channels[0],
                    out_channels=args.channels[1],
                    kernel_size=args.kernel_size,
-                   stride=1,
+                   stride=[1,1,1],
                    dilation=1,
                    bias=False)
+
   elif args.library == "minuet":
     from minuet.nn import SparseConv3d
     model = SparseConv3d(in_channels=args.channels[0],
@@ -45,7 +53,27 @@ def main(args):
                          kernel_size=args.kernel_size,
                          stride=1,
                          dilation=1,
-                         bias=False)
+                         bias=False).cuda()
+    model = Sequential(
+        spnn.SparseConv3d(in_channels=args.channels[0],
+                          out_channels=16,
+                          kernel_size=3,
+                          stride=1,),
+                          
+        #spnn.BatchNorm(num_features=num_channels[0]),
+        spnn.ReLU(True),
+        spnn.SparseConv3d(in_channels=16,
+                          out_channels=32,
+                          kernel_size=3,
+                          stride=1,),
+        #spnn.BatchNorm(num_features=num_channels[0]),
+        spnn.ReLU(True),
+        spnn.SparseConv3d(in_channels=32,
+                          out_channels=args.channels[1],
+                          kernel_size=3,
+                          stride=1),
+    ).cuda()
+
   elif args.library == "minkowski":
     from MinkowskiEngine import MinkowskiConvolution
     model = MinkowskiConvolution(dimension=3,
@@ -60,6 +88,9 @@ def main(args):
 
   model.cuda()
   model.eval()
+
+  print("model", model)
+  print("woopdoop")
 
   timings_full = []
   timings_gmas = []
@@ -152,19 +183,32 @@ def main(args):
 
         event1 = torch.cuda.Event(enable_timing=True)
         event2 = torch.cuda.Event(enable_timing=True)
-        event1.record()
+        
         with torch.cuda.nvtx.range(f"{args.library}.{r}"):
           if args.library == "minuet":
             from minuet.nn import functional as F
             index = F.build_sorted_index(inputs.C, batch_dims=inputs.batch_dims)
+
+           
+            #index = index[:5000]
             from minuet import SparseTensor
             inputs = SparseTensor(coordinates=inputs.C[index],
                                   features=inputs.F[index],
-                                  batch_dims=inputs.batch_dims)
-          _ = model(inputs)
-        event2.record()
-        event2.synchronize()
-        timings_full.append(event1.elapsed_time(event2))
+                                  batch_dims=inputs.batch_dims).cuda()
+            
+          #print("inputs tensor", inputs.features, inputs.features.shape)
+          #event1.record()
+
+
+          with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=False, with_stack=True) as prof:
+           output = model(inputs)
+
+          print("output", output.C, output.C.shape)
+          print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=15))
+          #event2.record()
+          #event2.synchronize()
+          timings_full.append(event1.elapsed_time(event2))
+          print("time", event1.elapsed_time(event2))
 
         event1 = torch.cuda.Event(enable_timing=True)
         event2 = torch.cuda.Event(enable_timing=True)
@@ -180,6 +224,7 @@ def main(args):
           if args.library == "minuet":
             from minuet.nn import functional as F
             index = F.build_sorted_index(inputs.C, batch_dims=inputs.batch_dims)
+            print("index", index)
             from minuet import SparseTensor
             inputs = SparseTensor(coordinates=inputs.C[index],
                                   features=inputs.F[index],
@@ -232,27 +277,27 @@ if __name__ == "__main__":
   parser.add_argument("-B",
                       "--batch_size",
                       type=int,
-                      default=1,
+                      default=4,
                       help="batch size (> 1 for batch inference)")
   parser.add_argument("-L",
                       "--library",
                       type=str,
-                      required=True,
+                      default="minuet",
                       help="the library to be benchmarked")
   parser.add_argument("--channels",
                       nargs=2,
                       type=int,
-                      required=True,
+                      default = [2,2],
                       help="number of input and output channels")
   parser.add_argument("-K",
                       "--kernel_size",
                       type=int,
-                      required=True,
+                      default=3,
                       help="kernel size of the convolution layer")
   parser.add_argument("-D",
                       "--dataset",
                       type=str,
-                      required=True,
+                      default = "configs/semantic3d-birdfountain-0.1.json",
                       help="dataset for benchmarking")
   parser.add_argument("-W",
                       "--num_warmup_rounds",
@@ -282,7 +327,7 @@ if __name__ == "__main__":
                       type=int,
                       help="samples for autotuning process")
   parser.add_argument('--verbose',
-                      action="store_true",
+                      action="store_true", 
                       help="be more verbose on the outputs")
-  parser.add_argument("--json", action="store_true", help="output json entry")
+  parser.add_argument("--json", action="store_true", default=True, help="output json entry")
   main(parser.parse_args())
