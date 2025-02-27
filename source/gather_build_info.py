@@ -14,6 +14,6 @@ print(packaging.version.parse(torch.version.cuda).major)
 
 try:
   import nvidia.cublas
-  print(getattr(nvidia.cublas.__path__, '_path')[0])
+  print(nvidia.cublas.__path__[0])
 except ImportError:
   print(None)

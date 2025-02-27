@@ -107,6 +107,8 @@ def make_tensor_from_dataset(dataset: Dataset,
                              batch_size: int,
                              num_features: Optional[int] = None,
                              library: Optional[str] = None):
+  
+  print("dataset: {dataset}")
   tensors = []
   indices = np.random.choice(len(dataset), size=batch_size)
   for i in range(batch_size):

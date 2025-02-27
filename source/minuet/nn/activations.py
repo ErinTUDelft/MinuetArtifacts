@@ -12,6 +12,14 @@ class ReLU(torch.nn.ReLU):
                         features=super().forward(x.F),
                         stride=x.stride,
                         batch_dims=x.batch_dims)
+  
+class Tanh(torch.nn.Tanh):
+
+  def forward(self, x: SparseTensor):
+    return SparseTensor(coordinates=x.C,
+                        features=super().forward(x.F),
+                        stride=x.stride,
+                        batch_dims=x.batch_dims)
 
 
 class ReLU6(torch.nn.ReLU6):

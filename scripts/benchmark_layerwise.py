@@ -38,41 +38,51 @@ def main(args):
   dataset = make_dataset(dataset, **dataset_config)
 
   if args.library == "torchsparse":
-    from torchsparse.nn import Conv3d
-    model = Conv3d(in_channels=args.channels[0],
+    import torchsparse.nn as tsnn
+    mode_ts = Sequential(tsnn.Conv3d(in_channels=args.channels[0],
+                   out_channels=16,
+                   kernel_size=args.kernel_size,
+                   stride=1,
+                   dilation=1,
+                   bias=False),
+                   tsnn.ReLU,
+
+                   tsnn.Conv3d(in_channels=16,
+                   out_channels=32,
+                   kernel_size=args.kernel_size,
+                   stride=1,
+                   dilation=1,
+                   bias=False),
+                   tsnn.ReLU,
+                   tsnn.Conv3d(in_channels=32,
                    out_channels=args.channels[1],
                    kernel_size=args.kernel_size,
-                   stride=[1,1,1],
+                   stride=1,
                    dilation=1,
-                   bias=False)
+                   bias=False)).cuda().eval()
+
 
   elif args.library == "minuet":
     from minuet.nn import SparseConv3d
-    model = SparseConv3d(in_channels=args.channels[0],
-                         out_channels=args.channels[1],
-                         kernel_size=args.kernel_size,
-                         stride=1,
-                         dilation=1,
-                         bias=False).cuda()
-    model = Sequential(
+    model_minuet = Sequential(
         spnn.SparseConv3d(in_channels=args.channels[0],
                           out_channels=16,
-                          kernel_size=3,
+                          kernel_size=args.kernel_size,
                           stride=1,),
                           
         #spnn.BatchNorm(num_features=num_channels[0]),
         spnn.ReLU(True),
         spnn.SparseConv3d(in_channels=16,
                           out_channels=32,
-                          kernel_size=3,
+                          kernel_size=args.kernel_size,
                           stride=1,),
         #spnn.BatchNorm(num_features=num_channels[0]),
         spnn.ReLU(True),
         spnn.SparseConv3d(in_channels=32,
                           out_channels=args.channels[1],
-                          kernel_size=3,
+                          kernel_size=args.kernel_size,
                           stride=1),
-    ).cuda()
+    ).cuda().eval()
 
   elif args.library == "minkowski":
     from MinkowskiEngine import MinkowskiConvolution
@@ -86,10 +96,9 @@ def main(args):
   else:
     raise NotImplementedError(args.library)
 
-  model.cuda()
-  model.eval()
 
-  print("model", model)
+  print("model_ts", model_ts)
+  print("model_ts", model_minuet)
   print("woopdoop")
 
   timings_full = []
@@ -195,11 +204,12 @@ def main(args):
             inputs = SparseTensor(coordinates=inputs.C[index],
                                   features=inputs.F[index],
                                   batch_dims=inputs.batch_dims).cuda()
+            print("test1")
             
           #print("inputs tensor", inputs.features, inputs.features.shape)
           #event1.record()
 
-
+          print(f"inputs: {inputs}")
           with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=False, with_stack=True) as prof:
            output = model(inputs)
 
@@ -277,12 +287,12 @@ if __name__ == "__main__":
   parser.add_argument("-B",
                       "--batch_size",
                       type=int,
-                      default=4,
+                      default=2,
                       help="batch size (> 1 for batch inference)")
   parser.add_argument("-L",
                       "--library",
                       type=str,
-                      default="minuet",
+                      default="torchsparse",
                       help="the library to be benchmarked")
   parser.add_argument("--channels",
                       nargs=2,
